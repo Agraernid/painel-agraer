@@ -4,18 +4,21 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Painel AGRAER</title>
-    <!-- Importando o Chart.js para os gráficos -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <!-- Importando um CSS básico -->
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; margin: 0; padding: 20px; }
         .header { background-color: #24533B; color: white; padding: 20px; border-radius: 8px; text-align: center; margin-bottom: 20px; }
-        .kpis { display: flex; justify-content: space-around; margin-bottom: 20px; }
-        .kpi-card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); text-align: center; width: 22%; }
+        .filters { display: flex; gap: 15px; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); margin-bottom: 20px; flex-wrap: wrap; }
+        .filter-group { display: flex; flex-direction: column; flex: 1; min-width: 150px; }
+        .filter-group label { font-size: 12px; color: #666; margin-bottom: 5px; font-weight: bold; }
+        .filter-group select, .filter-group input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+        .kpis { display: flex; justify-content: space-around; margin-bottom: 20px; gap: 15px; flex-wrap: wrap; }
+        .kpi-card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); text-align: center; flex: 1; min-width: 200px; }
         .kpi-card h3 { margin: 0; color: #666; font-size: 14px; }
         .kpi-card p { margin: 10px 0 0; font-size: 24px; font-weight: bold; color: #24533B; }
-        .charts-container { display: flex; gap: 20px; }
-        .chart-box { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); width: 50%; height: 400px; }
+        .charts-container { display: flex; gap: 20px; flex-wrap: wrap; }
+        .chart-box { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); width: calc(50% - 10px); min-width: 300px; height: 400px; position: relative; }
+        @media (max-width: 768px) { .chart-box { width: 100%; } }
     </style>
 </head>
 <body>
@@ -24,7 +27,30 @@
         <h1>AGRAER | Painel de Logística</h1>
     </div>
 
-    <!-- Aqui ficam os KPIs -->
+    <!-- ÁREA DE FILTROS -->
+    <div class="filters">
+        <div class="filter-group">
+            <label>Data Inicial</label>
+            <input type="date" id="filtroDataInicio">
+        </div>
+        <div class="filter-group">
+            <label>Data Final</label>
+            <input type="date" id="filtroDataFim">
+        </div>
+        <div class="filter-group">
+            <label>Local de Entrega</label>
+            <select id="filtroLocal"><option value="TODOS">TODOS</option></select>
+        </div>
+        <div class="filter-group">
+            <label>Beneficiário</label>
+            <select id="filtroBeneficiario"><option value="TODOS">TODOS</option></select>
+        </div>
+        <div class="filter-group">
+            <label>Motorista</label>
+            <select id="filtroMotorista"><option value="TODOS">TODOS</option></select>
+        </div>
+    </div>
+
     <div class="kpis">
         <div class="kpi-card"><h3>Custo Total</h3><p id="kpi-custo">R$ 0,00</p></div>
         <div class="kpi-card"><h3>Insumos (t)</h3><p id="kpi-insumos">0</p></div>
@@ -32,32 +58,104 @@
         <div class="kpi-card"><h3>Distância Total</h3><p id="kpi-distancia">0 km</p></div>
     </div>
 
-    <!-- Aqui ficam os gráficos -->
     <div class="charts-container">
+        <div class="chart-box">
+            <canvas id="graficoInsumos"></canvas>
+        </div>
         <div class="chart-box">
             <canvas id="graficoCustos"></canvas>
         </div>
-        <div class="chart-box">
-            <canvas id="graficoBeneficiarios"></canvas>
-        </div>
     </div>
 
-    <!-- O Script que faz a mágica acontecer -->
     <script>
-        // COLOQUE AQUI A URL QUE VOCÊ GEROU NO APPS SCRIPT
+        // COLOQUE AQUI A SUA URL DO APPS SCRIPT
         const API_URL = "https://script.google.com/macros/s/AKfycbyRiVBqTN60G7a5eTx9hSpM6o0pOUuZ5eYkD2Zi19j8YtZjmhujDqtZzfFvvfsicHI/exec";
+        
+        let dadosGlobais = [];
+        let chartInsumos, chartCustos;
 
         async function carregarDados() {
             try {
                 const resposta = await fetch(API_URL);
-                const dados = await resposta.json();
+                dadosGlobais = await resposta.json();
                 
-                calcularKPIs(dados);
-                renderizarGraficos(dados);
+                // Formatar datas (o Sheets manda como texto às vezes)
+                dadosGlobais.forEach(d => {
+                    if(d.Data_Entrega) {
+                        // Tenta converter para um formato padrão de data (AAAA-MM-DD)
+                        let dataStr = String(d.Data_Entrega);
+                        // Se for data com barra (DD/MM/AAAA), converte para AAAA-MM-DD
+                        if(dataStr.includes('/')) {
+                            let partes = dataStr.split('/');
+                            if(partes.length === 3) {
+                                // Se o ano estiver por último
+                                if(partes[2].length === 4) d.dataFormatada = `${partes[2]}-${partes[1].padStart(2, '0')}-${partes[0].padStart(2, '0')}`;
+                                // Se o ano estiver primeiro (padrão americano)
+                                else if(partes[0].length === 4) d.dataFormatada = `${partes[0]}-${partes[1].padStart(2, '0')}-${partes[2].padStart(2, '0')}`;
+                            }
+                        } else {
+                            // Se já vier no formato AAAA-MM-DD ou outro
+                            let dataObj = new Date(dataStr);
+                            if(!isNaN(dataObj)) {
+                                d.dataFormatada = dataObj.toISOString().split('T')[0];
+                            }
+                        }
+                    }
+                });
+
+                preencherFiltros(dadosGlobais);
+                atualizarPainel(); // Mostra tudo ao carregar
+
+                // Adiciona eventos para atualizar o painel quando mudar um filtro
+                document.getElementById('filtroDataInicio').addEventListener('change', atualizarPainel);
+                document.getElementById('filtroDataFim').addEventListener('change', atualizarPainel);
+                document.getElementById('filtroLocal').addEventListener('change', atualizarPainel);
+                document.getElementById('filtroBeneficiario').addEventListener('change', atualizarPainel);
+                document.getElementById('filtroMotorista').addEventListener('change', atualizarPainel);
 
             } catch (erro) {
                 console.error("Erro ao carregar os dados:", erro);
             }
+        }
+
+        function preencherFiltros(dados) {
+            // Pega valores únicos e preenche os dropdowns
+            const locais = [...new Set(dados.map(d => d.Local_Entrega).filter(Boolean))].sort();
+            const beneficiarios = [...new Set(dados.map(d => d.Beneficiario).filter(Boolean))].sort();
+            const motoristas = [...new Set(dados.map(d => d.Motorista).filter(Boolean))].sort();
+
+            const selectLocal = document.getElementById('filtroLocal');
+            locais.forEach(l => selectLocal.add(new Option(l, l)));
+
+            const selectBenef = document.getElementById('filtroBeneficiario');
+            beneficiarios.forEach(b => selectBenef.add(new Option(b, b)));
+
+            const selectMot = document.getElementById('filtroMotorista');
+            motoristas.forEach(m => selectMot.add(new Option(m, m)));
+        }
+
+        function atualizarPainel() {
+            const filtroDataInicio = document.getElementById('filtroDataInicio').value;
+            const filtroDataFim = document.getElementById('filtroDataFim').value;
+            const filtroLocal = document.getElementById('filtroLocal').value;
+            const filtroBeneficiario = document.getElementById('filtroBeneficiario').value;
+            const filtroMotorista = document.getElementById('filtroMotorista').value;
+
+            // Filtra os dados com base nos inputs
+            const dadosFiltrados = dadosGlobais.filter(d => {
+                let passaData = true;
+                if (filtroDataInicio && d.dataFormatada) passaData = d.dataFormatada >= filtroDataInicio;
+                if (filtroDataFim && d.dataFormatada) passaData = passaData && (d.dataFormatada <= filtroDataFim);
+
+                let passaLocal = (filtroLocal === "TODOS") || (d.Local_Entrega === filtroLocal);
+                let passaBenef = (filtroBeneficiario === "TODOS") || (d.Beneficiario === filtroBeneficiario);
+                let passaMot = (filtroMotorista === "TODOS") || (d.Motorista === filtroMotorista);
+
+                return passaData && passaLocal && passaBenef && passaMot;
+            });
+
+            calcularKPIs(dadosFiltrados);
+            renderizarGraficos(dadosFiltrados);
         }
 
         function calcularKPIs(dados) {
@@ -66,42 +164,59 @@
             let distancia = 0;
 
             dados.forEach(linha => {
-                // Substitua 'Custo_Combustivel', 'Qtd_Entregue', etc pelos nomes EXATOS dos seus cabeçalhos
                 custoTotal += Number(linha['Custo_Combustivel']) || 0;
-                custoTotal += Number(linha['Valor_Diaria']) || 0;
+                custoTotal += Number(linha['Valor_Diaria']) || 0; // Valor total da diária rateado
+                custoTotal += Number(linha['Outras_Despesas']) || 0;
+                
                 insumos += Number(linha['Qtd_Entregue']) || 0;
                 distancia += Number(linha['Distancia_KM']) || 0;
             });
 
-            document.getElementById('kpi-custo').innerText = `R$ ${custoTotal.toFixed(2)}`;
-            document.getElementById('kpi-insumos').innerText = `${insumos.toFixed(2)} t`;
-            document.getElementById('kpi-custo-ton').innerText = `R$ ${(custoTotal / insumos).toFixed(2)}`;
-            document.getElementById('kpi-distancia').innerText = `${distancia} km`;
+            document.getElementById('kpi-custo').innerText = `R$ ${custoTotal.toFixed(2).replace('.', ',')}`;
+            document.getElementById('kpi-insumos').innerText = `${insumos.toFixed(2).replace('.', ',')} t`;
+            document.getElementById('kpi-custo-ton').innerText = insumos > 0 ? `R$ ${(custoTotal / insumos).toFixed(2).replace('.', ',')}` : 'R$ 0,00';
+            document.getElementById('kpi-distancia').innerText = `${distancia.toFixed(0)} km`;
         }
 
         function renderizarGraficos(dados) {
-            // Exemplo de gráfico de custos (por Insumo)
-            const labelsInsumos = [...new Set(dados.map(l => l['Insumo']))];
-            const valoresInsumos = labelsInsumos.map(insumo => {
-                return dados.filter(l => l['Insumo'] === insumo)
-                            .reduce((acc, l) => acc + (Number(l['Qtd_Entregue']) || 0), 0);
+            // 1. Gráfico de Insumos (Barras)
+            const insumosUnicos = [...new Set(dados.map(d => d.Insumo).filter(Boolean))];
+            const qtdPorInsumo = insumosUnicos.map(insumo => {
+                return dados.filter(d => d.Insumo === insumo).reduce((acc, d) => acc + (Number(d.Qtd_Entregue) || 0), 0);
             });
 
-            new Chart(document.getElementById('graficoBeneficiarios'), {
+            if(chartInsumos) chartInsumos.destroy();
+            chartInsumos = new Chart(document.getElementById('graficoInsumos'), {
                 type: 'bar',
                 data: {
-                    labels: labelsInsumos,
+                    labels: insumosUnicos,
+                    datasets: [{ label: 'Qtd Entregue (t)', data: qtdPorInsumo, backgroundColor: '#24533B' }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Insumos Entregues (t)' } } }
+            });
+
+            // 2. Gráfico de Custos (Pizza)
+            let totalComb = 0, totalDiaria = 0, totalOutras = 0;
+            dados.forEach(d => {
+                totalComb += Number(d.Custo_Combustivel) || 0;
+                totalDiaria += Number(d.Valor_Diaria) || 0;
+                totalOutras += Number(d.Outras_Despesas) || 0;
+            });
+
+            if(chartCustos) chartCustos.destroy();
+            chartCustos = new Chart(document.getElementById('graficoCustos'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['Combustível', 'Diárias', 'Outras Despesas'],
                     datasets: [{
-                        label: 'Qtd Entregue (t)',
-                        data: valoresInsumos,
-                        backgroundColor: '#24533B'
+                        data: [totalComb, totalDiaria, totalOutras],
+                        backgroundColor: ['#24533B', '#4CAF50', '#A5D6A7']
                     }]
                 },
-                options: { responsive: true, maintainAspectRatio: false }
+                options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Composição dos Custos (R$)' } } }
             });
         }
 
-        // Roda a função quando a página carregar
         carregarDados();
     </script>
 </body>
