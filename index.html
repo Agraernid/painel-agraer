@@ -221,3 +221,141 @@
     </script>
 </body>
 </html>
+    <script>
+        // COLOQUE AQUI A SUA URL DO APPS SCRIPT (Entre as aspas)
+        const API_URL = "SUA_URL_DO_APPS_SCRIPT_AQUI";
+        
+        let dadosGlobais = [];
+        let chartInsumos, chartCustos;
+
+        async function carregarDados() {
+            try {
+                const resposta = await fetch(API_URL);
+                dadosGlobais = await resposta.json();
+                
+                dadosGlobais.forEach(d => {
+                    if(d.Data_Entrega) {
+                        let dataStr = String(d.Data_Entrega);
+                        if(dataStr.includes('/')) {
+                            let partes = dataStr.split('/');
+                            if(partes.length === 3) {
+                                if(partes[2].length === 4) d.dataFormatada = `${partes[2]}-${partes[1].padStart(2, '0')}-${partes[0].padStart(2, '0')}`;
+                                else if(partes[0].length === 4) d.dataFormatada = `${partes[0]}-${partes[1].padStart(2, '0')}-${partes[2].padStart(2, '0')}`;
+                            }
+                        } else {
+                            let dataObj = new Date(dataStr);
+                            if(!isNaN(dataObj)) d.dataFormatada = dataObj.toISOString().split('T')[0];
+                        }
+                    }
+                });
+
+                preencherFiltros(dadosGlobais);
+                atualizarPainel(); 
+
+                document.getElementById('filtroDataInicio').addEventListener('change', atualizarPainel);
+                document.getElementById('filtroDataFim').addEventListener('change', atualizarPainel);
+                document.getElementById('filtroLocal').addEventListener('change', atualizarPainel);
+                document.getElementById('filtroBeneficiario').addEventListener('change', atualizarPainel);
+                document.getElementById('filtroMotorista').addEventListener('change', atualizarPainel);
+
+            } catch (erro) {
+                console.error("Erro ao carregar os dados:", erro);
+            }
+        }
+
+        function preencherFiltros(dados) {
+            const locais = [...new Set(dados.map(d => d.Local_Entrega).filter(Boolean))].sort();
+            const beneficiarios = [...new Set(dados.map(d => d.Beneficiario).filter(Boolean))].sort();
+            const motoristas = [...new Set(dados.map(d => d.Motorista).filter(Boolean))].sort();
+
+            const selectLocal = document.getElementById('filtroLocal');
+            locais.forEach(l => selectLocal.add(new Option(l, l)));
+
+            const selectBenef = document.getElementById('filtroBeneficiario');
+            beneficiarios.forEach(b => selectBenef.add(new Option(b, b)));
+
+            const selectMot = document.getElementById('filtroMotorista');
+            motoristas.forEach(m => selectMot.add(new Option(m, m)));
+        }
+
+        function atualizarPainel() {
+            const filtroDataInicio = document.getElementById('filtroDataInicio').value;
+            const filtroDataFim = document.getElementById('filtroDataFim').value;
+            const filtroLocal = document.getElementById('filtroLocal').value;
+            const filtroBeneficiario = document.getElementById('filtroBeneficiario').value;
+            const filtroMotorista = document.getElementById('filtroMotorista').value;
+
+            const dadosFiltrados = dadosGlobais.filter(d => {
+                let passaData = true;
+                if (filtroDataInicio && d.dataFormatada) passaData = d.dataFormatada >= filtroDataInicio;
+                if (filtroDataFim && d.dataFormatada) passaData = passaData && (d.dataFormatada <= filtroDataFim);
+
+                let passaLocal = (filtroLocal === "TODOS") || (d.Local_Entrega === filtroLocal);
+                let passaBenef = (filtroBeneficiario === "TODOS") || (d.Beneficiario === filtroBeneficiario);
+                let passaMot = (filtroMotorista === "TODOS") || (d.Motorista === filtroMotorista);
+
+                return passaData && passaLocal && passaBenef && passaMot;
+            });
+
+            calcularKPIs(dadosFiltrados);
+            renderizarGraficos(dadosFiltrados);
+        }
+
+        function calcularKPIs(dados) {
+            let custoTotal = 0;
+            let insumos = 0;
+            let distancia = 0;
+
+            dados.forEach(linha => {
+                custoTotal += Number(linha['Custo_Combustivel']) || 0;
+                custoTotal += Number(linha['Valor_Diaria']) || 0; 
+                custoTotal += Number(linha['Outras_Despesas']) || 0;
+                
+                insumos += Number(linha['Qtd_Entregue']) || 0;
+                distancia += Number(linha['Distancia_KM']) || 0;
+            });
+
+            document.getElementById('kpi-custo').innerText = `R$ ${custoTotal.toFixed(2).replace('.', ',')}`;
+            document.getElementById('kpi-insumos').innerText = `${insumos.toFixed(2).replace('.', ',')} t`;
+            document.getElementById('kpi-custo-ton').innerText = insumos > 0 ? `R$ ${(custoTotal / insumos).toFixed(2).replace('.', ',')}` : 'R$ 0,00';
+            document.getElementById('kpi-distancia').innerText = `${distancia.toFixed(0)} km`;
+        }
+
+        function renderizarGraficos(dados) {
+            const insumosUnicos = [...new Set(dados.map(d => d.Insumo).filter(Boolean))];
+            const qtdPorInsumo = insumosUnicos.map(insumo => {
+                return dados.filter(d => d.Insumo === insumo).reduce((acc, d) => acc + (Number(d.Qtd_Entregue) || 0), 0);
+            });
+
+            if(chartInsumos) chartInsumos.destroy();
+            chartInsumos = new Chart(document.getElementById('graficoInsumos'), {
+                type: 'bar',
+                data: {
+                    labels: insumosUnicos,
+                    datasets: [{ label: 'Qtd Entregue (t)', data: qtdPorInsumo, backgroundColor: '#24533B' }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Insumos Entregues (t)' } } }
+            });
+
+            let totalComb = 0, totalDiaria = 0, totalOutras = 0;
+            dados.forEach(d => {
+                totalComb += Number(d.Custo_Combustivel) || 0;
+                totalDiaria += Number(d.Valor_Diaria) || 0;
+                totalOutras += Number(d.Outras_Despesas) || 0;
+            });
+
+            if(chartCustos) chartCustos.destroy();
+            chartCustos = new Chart(document.getElementById('graficoCustos'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['Combustível', 'Diárias', 'Outras Despesas'],
+                    datasets: [{ data: [totalComb, totalDiaria, totalOutras], backgroundColor: ['#24533B', '#4CAF50', '#A5D6A7'] }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Composição dos Custos (R$)' } } }
+            });
+        }
+
+        carregarDados();
+    </script>
+</body>
+</html>
