@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel AGRAER</title>
+    <!-- Importando o Chart.js para os gráficos -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Importando um CSS básico -->
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; margin: 0; padding: 20px; }
+        .header { background-color: #24533B; color: white; padding: 20px; border-radius: 8px; text-align: center; margin-bottom: 20px; }
+        .kpis { display: flex; justify-content: space-around; margin-bottom: 20px; }
+        .kpi-card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); text-align: center; width: 22%; }
+        .kpi-card h3 { margin: 0; color: #666; font-size: 14px; }
+        .kpi-card p { margin: 10px 0 0; font-size: 24px; font-weight: bold; color: #24533B; }
+        .charts-container { display: flex; gap: 20px; }
+        .chart-box { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); width: 50%; height: 400px; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>AGRAER | Painel de Logística</h1>
+    </div>
+
+    <!-- Aqui ficam os KPIs -->
+    <div class="kpis">
+        <div class="kpi-card"><h3>Custo Total</h3><p id="kpi-custo">R$ 0,00</p></div>
+        <div class="kpi-card"><h3>Insumos (t)</h3><p id="kpi-insumos">0</p></div>
+        <div class="kpi-card"><h3>Custo/Tonelada</h3><p id="kpi-custo-ton">R$ 0,00</p></div>
+        <div class="kpi-card"><h3>Distância Total</h3><p id="kpi-distancia">0 km</p></div>
+    </div>
+
+    <!-- Aqui ficam os gráficos -->
+    <div class="charts-container">
+        <div class="chart-box">
+            <canvas id="graficoCustos"></canvas>
+        </div>
+        <div class="chart-box">
+            <canvas id="graficoBeneficiarios"></canvas>
+        </div>
+    </div>
+
+    <!-- O Script que faz a mágica acontecer -->
+    <script>
+        // COLOQUE AQUI A URL QUE VOCÊ GEROU NO APPS SCRIPT
+        const API_URL = "SUA_URL_DO_APPS_SCRIPT_AQUI";
+
+        async function carregarDados() {
+            try {
+                const resposta = await fetch(API_URL);
+                const dados = await resposta.json();
+                
+                calcularKPIs(dados);
+                renderizarGraficos(dados);
+
+            } catch (erro) {
+                console.error("Erro ao carregar os dados:", erro);
+            }
+        }
+
+        function calcularKPIs(dados) {
+            let custoTotal = 0;
+            let insumos = 0;
+            let distancia = 0;
+
+            dados.forEach(linha => {
+                // Substitua 'Custo_Combustivel', 'Qtd_Entregue', etc pelos nomes EXATOS dos seus cabeçalhos
+                custoTotal += Number(linha['Custo_Combustivel']) || 0;
+                custoTotal += Number(linha['Valor_Diaria']) || 0;
+                insumos += Number(linha['Qtd_Entregue']) || 0;
+                distancia += Number(linha['Distancia_KM']) || 0;
+            });
+
+            document.getElementById('kpi-custo').innerText = `R$ ${custoTotal.toFixed(2)}`;
+            document.getElementById('kpi-insumos').innerText = `${insumos.toFixed(2)} t`;
+            document.getElementById('kpi-custo-ton').innerText = `R$ ${(custoTotal / insumos).toFixed(2)}`;
+            document.getElementById('kpi-distancia').innerText = `${distancia} km`;
+        }
+
+        function renderizarGraficos(dados) {
+            // Exemplo de gráfico de custos (por Insumo)
+            const labelsInsumos = [...new Set(dados.map(l => l['Insumo']))];
+            const valoresInsumos = labelsInsumos.map(insumo => {
+                return dados.filter(l => l['Insumo'] === insumo)
+                            .reduce((acc, l) => acc + (Number(l['Qtd_Entregue']) || 0), 0);
+            });
+
+            new Chart(document.getElementById('graficoBeneficiarios'), {
+                type: 'bar',
+                data: {
+                    labels: labelsInsumos,
+                    datasets: [{
+                        label: 'Qtd Entregue (t)',
+                        data: valoresInsumos,
+                        backgroundColor: '#24533B'
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false }
+            });
+        }
+
+        // Roda a função quando a página carregar
+        carregarDados();
+    </script>
+</body>
+</html>
